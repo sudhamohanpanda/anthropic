@@ -1,0 +1,23 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Generated artifacts
+generated/
+
+# Node
+node_modules/
+
+# OS / editor
+.DS_Store
+.idea/
+*.iml
