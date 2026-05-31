@@ -1,0 +1,60 @@
+flowchart TB
+    User([User prompt]) --> Main["main.py<br/>load_dotenv • stream messages<br/>(System/Assistant/User/Result)"]
+    Main -->|initialize_research_system_with_hooks| Coord
+
+    subgraph Coordinator["src/coordinator.py — supervisor"]
+        direction TB
+        Coord["Coordinator agent<br/>plans • delegates via Task tool"]
+        QR["SDKQueryRunner<br/>query() + ClaudeAgentOptions<br/><i>(AgentRunner path dormant)</i>"]
+        Coord --- QR
+    end
+
+    Main --> Telemetry
+    QR -->|"Task / Agent handoff"| Search
+    QR -->|"Task / Agent handoff"| Analyzer
+    QR -->|"Task / Agent handoff"| Synth
+    QR -->|"Task / Agent handoff"| Reporter
+
+    subgraph Subagents["src/agents/* — scoped AgentDefinitions"]
+        direction TB
+        Search["search_agent<br/>tools: mcp__research__web_search"]
+        Analyzer["analyzer_agent<br/>tools: mcp__research__read_document, Glob, Grep"]
+        Synth["synthesizer<br/>brain-only (no tools)"]
+        Reporter["reporter<br/>ReportOutputSchema (Pydantic)"]
+    end
+
+    subgraph MCP["src/tools — in-process MCP server (research)"]
+        direction TB
+        Reg["registry.build_research_mcp_server<br/>@tool wrappers • asyncio.to_thread"]
+        WS["web_search.execute_web_search<br/>retry + graceful degradation"]
+        DR["doc_reader.read_local_document"]
+        Reg --- WS
+        Reg --- DR
+    end
+
+    Search -->|mcp__research__web_search| WS
+    Analyzer -->|mcp__research__read_document| DR
+    WS -->|HTTP| Tavily([Tavily API])
+    DR -->|read| FS([Workspace files])
+
+    subgraph Hooks["Query-path hooks — _build_query_hooks"]
+        direction TB
+        PreH["PreToolUse:<br/>pre_tool_use_token_guard"]
+        PostH["PostToolUseFailure:<br/>post_tool_failure_logger"]
+        StopH["SubagentStop:<br/>subagent_stop_logger"]
+    end
+
+    QR -.registers.-> Hooks
+    PreH -.->|"guards oversized<br/>synthesizer payload<br/>(compress_payload @80k)"| Synth
+
+    Reporter --> Report([Cited Markdown report])
+
+    subgraph Tel["src/telemetry.py — module singleton"]
+        direction TB
+        Telemetry["OpenTelemetry counters<br/>tokens.input • tokens.saved • cost.usd"]
+        Dash["LiveMetricStore + HTTP dashboard<br/>127.0.0.1:8765"]
+        Telemetry --- Dash
+    end
+
+    PreH -.records.-> Telemetry
+    QR -->|"bundled Claude CLI"| Anthropic([Anthropic API])
